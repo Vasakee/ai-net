@@ -146,15 +146,29 @@ export function computeRunningTotal(transactions: TransactionEvent[]): number {
   return Number(total.toFixed(7))
 }
 
+const memoCache = new Map<string, Promise<string | undefined>>()
+
+export function clearMemoCache(): void {
+  memoCache.clear()
+}
+
 async function fetchMemo(txHash: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
-    if (!res.ok) return undefined
-    const data = await res.json()
-    return data.memo || undefined
-  } catch {
-    return undefined
+  if (memoCache.has(txHash)) {
+    return memoCache.get(txHash)!
   }
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
+      if (!res.ok) return undefined
+      const data = await res.json()
+      return data.memo || undefined
+    } catch {
+      return undefined
+    }
+  })()
+
+  memoCache.set(txHash, promise)
+  return promise
 }
 
 /**
@@ -225,7 +239,7 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
       // Filter only payment operations
       const paymentRecords = records.filter((r) => r.type === 'payment')
 
-      // Fetch memos in parallel
+      // Fetch memos in parallel (memoCache guarantees each txHash is fetched at most once)
       const memoResults = await Promise.allSettled(
         paymentRecords.map((r) => fetchMemo(r.transaction_hash))
       )
@@ -248,6 +262,7 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
 
       setTransactions(parsed)
       setError(null)
+      isFirstLoad.current = false
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to fetch transactions'
@@ -262,8 +277,45 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
   useEffect(() => {
     fetchHistory()
 
-    const interval = setInterval(fetchHistory, REFRESH_INTERVAL)
-    return () => clearInterval(interval)
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const startTimer = () => {
+      if (!intervalId) {
+        intervalId = setInterval(() => {
+          if (typeof document !== 'undefined' && document.hidden) return
+          fetchHistory()
+        }, REFRESH_INTERVAL)
+      }
+    }
+
+    const stopTimer = () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = null
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        stopTimer()
+      } else {
+        fetchHistory()
+        startTimer()
+      }
+    }
+
+    startTimer()
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    return () => {
+      stopTimer()
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
   }, [fetchHistory])
 
   const refresh = useCallback(() => {

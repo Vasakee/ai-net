@@ -61,8 +61,9 @@ export interface JobStore {
       progress?: number;
       completedAt?: string | null;
       failedAt?: string | null;
+      expectedStatus?: JobStatus | JobStatus[];
     }
-  ): void;
+  ): boolean;
   updateProgress(id: string, progress: number): void;
   list(filter?: {
     status?: JobStatus;
@@ -149,6 +150,12 @@ export function initJobSchema(db: Database.Database): void {
       updatedAt    TEXT NOT NULL,
       completedAt  TEXT,
       failedAt     TEXT
+    );
+    CREATE TABLE IF NOT EXISTS job_history (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      jobId      TEXT NOT NULL,
+      status     TEXT NOT NULL,
+      createdAt  TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_status_nextRun ON jobs (status, nextRunAt);
     CREATE INDEX IF NOT EXISTS idx_jobs_taskId ON jobs (taskId);
@@ -320,32 +327,68 @@ export function createJobStore(db: Database.Database): JobStore {
         progress?: number;
         completedAt?: string | null;
         failedAt?: string | null;
+        expectedStatus?: JobStatus | JobStatus[];
       }
-    ): void {
+    ): boolean {
       const now = new Date().toISOString();
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as any;
-      if (!current) return;
+      const setClauses: string[] = ["status = ?", "updatedAt = ?"];
+      const params: any[] = [status, now];
 
-      const attempts = updates?.attempts !== undefined ? updates.attempts : current.attempts;
-      const progress = updates?.progress !== undefined ? updates.progress : current.progress;
-      const lastError = updates?.lastError !== undefined ? updates.lastError : current.lastError;
-      const nextRunAt = updates?.nextRunAt !== undefined ? updates.nextRunAt : current.nextRunAt;
-      const completedAt =
-        updates?.completedAt !== undefined ? updates.completedAt : current.completedAt;
-      const failedAt = updates?.failedAt !== undefined ? updates.failedAt : current.failedAt;
+      if (updates) {
+        if (updates.attempts !== undefined) {
+          setClauses.push("attempts = ?");
+          params.push(updates.attempts);
+        }
+        if (updates.progress !== undefined) {
+          setClauses.push("progress = ?");
+          params.push(updates.progress);
+        }
+        if (updates.lastError !== undefined) {
+          setClauses.push("lastError = ?");
+          params.push(updates.lastError);
+        }
+        if (updates.nextRunAt !== undefined) {
+          setClauses.push("nextRunAt = ?");
+          params.push(updates.nextRunAt);
+        }
+        if (updates.completedAt !== undefined) {
+          setClauses.push("completedAt = ?");
+          params.push(updates.completedAt);
+        }
+        if (updates.failedAt !== undefined) {
+          setClauses.push("failedAt = ?");
+          params.push(updates.failedAt);
+        }
+      }
 
-      db.prepare(`
-        UPDATE jobs
-        SET status = ?,
-            attempts = ?,
-            progress = ?,
-            lastError = ?,
-            nextRunAt = ?,
-            completedAt = ?,
-            failedAt = ?,
-            updatedAt = ?
-        WHERE id = ?
-      `).run(status, attempts, progress, lastError, nextRunAt, completedAt, failedAt, now, id);
+      let whereClause = "WHERE id = ?";
+      params.push(id);
+
+      if (updates?.expectedStatus) {
+        const expected = Array.isArray(updates.expectedStatus)
+          ? updates.expectedStatus
+          : [updates.expectedStatus];
+        if (expected.length > 0) {
+          const placeholders = expected.map(() => "?").join(", ");
+          whereClause += ` AND status IN (${placeholders})`;
+          params.push(...expected);
+        }
+      }
+
+      const query = `UPDATE jobs SET ${setClauses.join(", ")} ${whereClause}`;
+
+      const updateTx = db.transaction(() => {
+        const info = db.prepare(query).run(...params);
+        if (info.changes > 0) {
+          db.prepare(`
+            INSERT INTO job_history (jobId, status, createdAt)
+            VALUES (?, ?, ?)
+          `).run(id, status, now);
+        }
+        return info.changes > 0;
+      });
+
+      return updateTx();
     },
 
     updateProgress(id: string, progress: number): void {

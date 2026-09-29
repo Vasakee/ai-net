@@ -38,6 +38,19 @@ function makeDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_events_task_seq
       ON task_events (task_id, task_seq ASC);
+    CREATE TABLE IF NOT EXISTS quality_scores (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      taskId       TEXT    NOT NULL,
+      nodeId       TEXT    NOT NULL,
+      agentId      TEXT,
+      agentType    TEXT    NOT NULL,
+      score        REAL    NOT NULL,
+      completeness REAL    NOT NULL,
+      relevance    REAL    NOT NULL,
+      format       REAL    NOT NULL,
+      needsReview  INTEGER DEFAULT 0,
+      timestamp    TEXT    NOT NULL
+    );
   `);
   return db;
 }

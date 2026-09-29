@@ -168,7 +168,7 @@ export interface TaskDb {
   getEventHistory(taskId: string): TaskEvent[];
   failRunningTasks(): void;
   insertQualityScore(record: QualityScoreRecord): void;
-  listQualityScores(agentId?: string, limit?: number): QualityScoreRecord[];
+  listQualityScores(agentId?: string, limit?: number, cursor?: number): QualityScoreRecord[];
 
   /**
    * Write (or overwrite) a task's billing snapshot. Called once the task
@@ -261,9 +261,10 @@ export function createTaskDb(db: Database.Database): TaskDb {
         dag: JSON.parse(row.dagJson),
       }));
 
-      const { total } = db
+      const countRow = db
         .prepare(`SELECT COUNT(*) as total FROM tasks WHERE ${whereClause}`)
-        .get(...params) as { total: number };
+        .get(...params) as { total?: number } | undefined;
+      const total = countRow?.total ?? 0;
 
       return { tasks, total };
     },
@@ -435,18 +436,29 @@ export function createTaskDb(db: Database.Database): TaskDb {
       });
     },
 
-    listQualityScores(agentId?: string, limit: number = 500): QualityScoreRecord[] {
-      const rows = (
-        agentId
-          ? db
-              .prepare(
-                "SELECT * FROM quality_scores WHERE agentId = ? ORDER BY id ASC LIMIT ?",
-              )
-              .all(agentId, limit)
-          : db
-              .prepare("SELECT * FROM quality_scores ORDER BY id ASC LIMIT ?")
-              .all(limit)
-      ) as Array<{
+    listQualityScores(agentId?: string, limit: number = 500, cursor?: number): QualityScoreRecord[] {
+      let boundedLimit = typeof limit === "number" && !isNaN(limit) ? Math.floor(limit) : 500;
+      boundedLimit = Math.max(1, Math.min(500, boundedLimit));
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+
+      if (agentId) {
+        conditions.push("agentId = ?");
+        params.push(agentId);
+      }
+
+      if (cursor !== undefined && cursor !== null && !isNaN(Number(cursor))) {
+        conditions.push("id < ?");
+        params.push(Number(cursor));
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const query = `SELECT * FROM quality_scores ${whereClause} ORDER BY id DESC LIMIT ?`;
+      params.push(boundedLimit);
+
+      const rows = db.prepare(query).all(...params) as Array<{
+        id: number;
         taskId: string;
         nodeId: string;
         agentId: string | null;
@@ -455,11 +467,12 @@ export function createTaskDb(db: Database.Database): TaskDb {
         completeness: number;
         relevance: number;
         format: number;
-        needsReview: number;
+        needsReview: number | null;
         timestamp: string;
       }>;
 
       return rows.map((r) => ({
+        id: r.id,
         taskId: r.taskId,
         nodeId: r.nodeId,
         agentId: r.agentId ?? undefined,
@@ -468,6 +481,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
         completeness: r.completeness,
         relevance: r.relevance,
         format: r.format,
+        /** Default legacy NULL or non-1 needsReview to false */
         needsReview: r.needsReview === 1,
         timestamp: r.timestamp,
       }));

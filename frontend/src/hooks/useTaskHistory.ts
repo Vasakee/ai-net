@@ -240,6 +240,7 @@ export function useTaskHistory(
       } else if (
         !useFallback &&
         envelope &&
+        !Array.isArray(envelope) &&
         Array.isArray(envelope.data?.items) &&
         envelope.data.pagination &&
         typeof envelope.data.pagination.hasNextPage === 'boolean' &&

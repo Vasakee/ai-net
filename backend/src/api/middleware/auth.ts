@@ -51,14 +51,16 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 }
 
 /**
- * Require a valid session access token.
+/**
+ * Strict session auth middleware for protected user endpoints.
+ * Requires a valid unrevoked access token in Authorization: Bearer <token>.
  */
 export function sessionAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
   const auth = req.headers["authorization"] ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
 
   if (!token) {
-    res.status(401).json({ error: "Unauthorized", message: "Missing Authorization header" });
+    res.status(401).json({ error: "Unauthorized", message: "Missing authorization token" });
     return;
   }
 
@@ -66,8 +68,9 @@ export function sessionAuthMiddleware(req: Request, res: Response, next: NextFun
     const payload = getAuthService().verifyAccessToken(token);
     req.user = payload;
     return next();
-  } catch {
-    res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Invalid or expired token";
+    res.status(401).json({ error: "Unauthorized", message });
   }
 }
 

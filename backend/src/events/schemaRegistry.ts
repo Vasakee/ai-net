@@ -203,13 +203,10 @@ export function validateEvent(event: {
     };
   }
 
-  // Check that the event type is known
+  // Check that the event type is known; un-modeled event types (e.g. system events) are allowed
   const payloadSchema = versionSchemas[type as EventType];
   if (!payloadSchema) {
-    return {
-      valid: false,
-      errors: [`Unknown event type: ${type}`],
-    };
+    return { valid: true, errors: [] };
   }
 
   // Validate the payload

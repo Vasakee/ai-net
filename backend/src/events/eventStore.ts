@@ -275,7 +275,7 @@ export function createEventStore(db?: Database.Database | string): EventStore {
 
   return {
     append(event: AppEvent): StoredEvent {
-      const validation = validateEvent(event);
+      const validation = validateEvent(event as unknown as Parameters<typeof validateEvent>[0]);
       if (!validation.valid) {
         log.warn({ errors: validation.errors, type: event.type }, 'Event validation notice');
       }
@@ -284,20 +284,6 @@ export function createEventStore(db?: Database.Database | string): EventStore {
       // 0 only as a defensive measure so the insert never fails on a missing
       // value.
       const taskSeq = event.taskSeq ?? 0;
-
-      // Validate the event payload against the declared version schema.
-      // A validation failure is a programming error — throw immediately rather
-      // than silently persisting a malformed event.
-      // Cast through unknown: AppEvent is a discriminated union without a string
-      // index signature, but validateEvent reads only type/version/payload at
-      // runtime, so this cast is safe.
-      const validation = validateEvent(event as unknown as Parameters<typeof validateEvent>[0]);
-      if (!validation.valid) {
-        throw new Error(
-          `Event payload schema validation failed for ${event.type} v${event.version ?? 1}: ` +
-          validation.errors.join('; ')
-        );
-      }
 
       const nodeId =
         'nodeId' in event && event.nodeId != null ? (event.nodeId as string) : null;

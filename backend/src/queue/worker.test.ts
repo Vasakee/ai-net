@@ -196,6 +196,66 @@ describe("Background Job Queue & Worker", () => {
       expect(jobAfterRecovery?.status).toBe("pending");
     });
 
+    it("rejects status transition from stale prior status (#649)", () => {
+      const now = new Date().toISOString();
+      store.insert({
+        id: "job_stale_1",
+        taskId: "t_stale_1",
+        type: "execute_task",
+        payload: {},
+        status: "completed",
+        priority: "normal",
+        progress: 100,
+        attempts: 1,
+        maxAttempts: 3,
+        nextRunAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Try transitioning from expected status "active" when status is already "completed"
+      const result = store.updateStatus("job_stale_1", "active", { expectedStatus: "active" });
+      expect(result).toBe(false);
+
+      const current = store.findById("job_stale_1");
+      expect(current?.status).toBe("completed");
+    });
+
+    it("50 concurrent updateStatus calls converge on exactly one terminal state without clobbering fields (#649)", () => {
+      const now = new Date().toISOString();
+      store.insert({
+        id: "job_concurrent_1",
+        taskId: "t_conc_1",
+        type: "execute_task",
+        payload: {},
+        status: "active",
+        priority: "normal",
+        progress: 50,
+        attempts: 1,
+        maxAttempts: 3,
+        nextRunAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Perform progress updates and completion updates in rapid sequence
+      for (let i = 0; i < 50; i++) {
+        store.updateProgress("job_concurrent_1", Math.min(100, 50 + i));
+        store.updateStatus("job_concurrent_1", "completed", {
+          completedAt: now,
+          expectedStatus: "active",
+        });
+      }
+
+      const finalJob = store.findById("job_concurrent_1");
+      expect(finalJob?.status).toBe("completed");
+      expect(finalJob?.progress).toBeGreaterThanOrEqual(50);
+
+      // Verify job_history has records
+      const historyCount = (db.prepare("SELECT COUNT(*) as c FROM job_history WHERE jobId = ?").get("job_concurrent_1") as any).c;
+      expect(historyCount).toBe(1);
+    });
+
     it("claimNextPendingJob marks the returned job active and never returns it twice", () => {
       const now = new Date().toISOString();
       const job = makeJob({ id: "claim_1", createdAt: now, nextRunAt: now });

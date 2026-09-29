@@ -6,8 +6,8 @@
  * it is not worth failing a paid run over.
  */
 
-import { createLogger } from '../utils/logger';
-import { createTaskDb, getTaskDb, type PersistedTaskCost, type TaskDb } from '../db/tasks';
+import { createLogger } from '../../utils/logger';
+import { createTaskDb, getTaskDb, type PersistedTaskCost, type TaskDb } from '../../db/tasks';
 import {
   activeSnapshots,
   getLedger,
@@ -110,7 +110,7 @@ export function settleTaskCost(taskId: string): TaskCostSnapshot | undefined {
     // it makes settlement authoritative: if a mid-task write was lost (DB blip,
     // crash between calls), the terminal row is rebuilt from the ledger rather
     // than left at whatever the last successful write managed to store.
-    for (const node of snapshot.nodes) {
+    for (const node of snapshot.agents) {
       persistNodeUsage(taskId, node.nodeId, node);
     }
 

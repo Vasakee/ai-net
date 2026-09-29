@@ -717,6 +717,6 @@ describe("npm script", () => {
   const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "package.json"), "utf8"));
 
   it("exposes db:migrate", () => {
-    expect(pkg.scripts["db:migrate"]).toBe("ts-node src/db/migrations/cli.ts");
+    expect(pkg.scripts["db:migrate"]).toBe("ts-node src/db/cli.ts migrate");
   });
 });
